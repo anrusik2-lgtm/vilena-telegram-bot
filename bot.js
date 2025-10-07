@@ -10,15 +10,34 @@ let data = {
 
 // Токен бота
 const token = '8349077397:AAFaVcrelkwgrJf4mdvIBfi38gLWjIwcs9s';
-const bot = new TelegramBot(token, {polling: true});
+
+// Создаем бота с опциями для вебхука
+const bot = new TelegramBot(token, {
+  webHook: {
+    port: process.env.PORT || 3000
+  }
+});
+
+// Устанавливаем вебхук
+const WEBHOOK_URL = 'https://vilena-bot.onrender.com';
+bot.setWebHook(`${WEBHOOK_URL}/bot${token}`);
 
 console.log('🤖 Бот Vilenamebel запускается...');
+console.log('🌐 Webhook URL:', `${WEBHOOK_URL}/bot${token}`);
 
-// Разрешаем CORS для сайта
+// Разрешаем JSON и CORS
+app.use(express.json());
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Headers', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   next();
+});
+
+// Обрабатываем вебхук от Telegram
+app.post(`/bot${token}`, (req, res) => {
+  bot.processUpdate(req.body);
+  res.sendStatus(200);
 });
 
 // Главная страница - статус бота
@@ -80,13 +99,17 @@ app.get('/', (req, res) => {
           background: #f8f9fa;
           border-radius: 10px;
         }
+        .error {
+          color: red;
+          font-weight: bold;
+        }
       </style>
     </head>
     <body>
       <div class="container">
         <div class="header">
           <h1>🤖 Vilenamebel Telegram Bot</h1>
-          <div class="status">✅ Статус: Бот работает</div>
+          <div class="status">✅ Статус: Бот работает (Webhook)</div>
         </div>
         
         <div class="section">
@@ -132,8 +155,9 @@ app.get('/', (req, res) => {
         
         <div class="section">
           <h3>🔧 Техническая информация:</h3>
+          <p>Webhook URL: <code>${WEBHOOK_URL}/bot${token}</code></p>
           <p>API для проверки ответов: <code>GET /api/replies/:userId</code></p>
-          <p>Пример: <code>https://your-app.onrender.com/api/replies/user_123456</code></p>
+          <p>Пример: <code>${WEBHOOK_URL}/api/replies/user_123456</code></p>
         </div>
       </div>
     </body>
@@ -161,16 +185,14 @@ app.get('/api/replies/:userId', (req, res) => {
 app.get('/api/test', (req, res) => {
   res.json({ 
     status: 'success', 
-    message: 'Vilenamebel Bot is working!',
-    timestamp: new Date().toISOString()
+    message: 'Vilenamebel Bot is working with Webhook!',
+    timestamp: new Date().toISOString(),
+    stats: {
+      clients: Object.keys(data.replies).length,
+      replies: Object.values(data.replies).reduce((acc, replies) => acc + replies.length, 0),
+      sessions: Object.keys(data.managerSessions).length
+    }
   });
-});
-
-// Запускаем веб-сервер
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`🌐 Веб-сервер запущен на порту ${PORT}`);
-  console.log(`📊 Статусная страница: http://localhost:${PORT}`);
 });
 
 // Обработчик команды /start
@@ -193,7 +215,9 @@ bot.onText(/\/start reply_(.+)/, (msg, match) => {
     `📞 Телефон: будет показан в заявке\n` +
     `📝 Напишите ваш ответ:\n\n` +
     `_Клиент увидит ваш ответ прямо на сайте vilenamebel.ru_`
-  );
+  ).catch(error => {
+    console.log('❌ Ошибка отправки сообщения:', error);
+  });
 });
 
 // Обработчик текстовых сообщений
@@ -231,7 +255,9 @@ bot.on('message', (msg) => {
     bot.sendMessage(chatId, 
       '✅ Ответ отправлен клиенту!\n\n' +
       'Клиент увидит ваше сообщение прямо на сайте vilenamebel.ru'
-    );
+    ).catch(error => {
+      console.log('❌ Ошибка отправки подтверждения:', error);
+    });
     
     console.log(`✅ Ответ для ${userId} сохранен: "${messageText}"`);
     
@@ -245,7 +271,7 @@ bot.on('message', (msg) => {
       `${managerInfo}\n` +
       `💬 Chat ID: ${chatId}`
     ).then(() => {
-      bot.sendMessage(chatId, '📤 Ваше сообщение переслано в основную группу');
+      return bot.sendMessage(chatId, '📤 Ваше сообщение переслано в основную группу');
     }).catch(error => {
       console.log('❌ Ошибка отправки в группу:', error);
       bot.sendMessage(chatId, '❌ Не удалось отправить сообщение в группу');
@@ -258,4 +284,17 @@ bot.on('error', (error) => {
   console.log('❌ Ошибка бота:', error);
 });
 
-console.log('✅ Бот Vilenamebel успешно запущен!');
+// Обработчик polling ошибок (если используется)
+bot.on('polling_error', (error) => {
+  console.log('❌ Ошибка polling:', error);
+});
+
+// Запускаем веб-сервер
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`🌐 Веб-сервер запущен на порту ${PORT}`);
+  console.log(`📊 Статусная страница: https://vilena-bot.onrender.com`);
+  console.log(`🔧 Webhook: https://vilena-bot.onrender.com/bot${token}`);
+});
+
+console.log('✅ Бот Vilenamebel успешно запущен с Webhook!');
