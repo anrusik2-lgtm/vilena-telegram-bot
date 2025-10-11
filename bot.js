@@ -14,11 +14,17 @@ let userSessions = {}; // Хранилище сессий
 // Middleware для API
 app.use(express.json());
 
-// Разрешаем CORS
+// ПРАВИЛЬНЫЕ CORS настройки
 app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control');
     res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    
+    // Обрабатываем preflight запросы
+    if (req.method === 'OPTIONS') {
+        return res.sendStatus(200);
+    }
+    
     next();
 });
 
@@ -54,6 +60,13 @@ app.post('/api/replies', (req, res) => {
     res.json({ status: 'ok', id: newReply.id });
 });
 
+// Эндпоинт для отметки прочтения
+app.post('/api/replies/:replyId/read', (req, res) => {
+    const replyId = req.params.replyId;
+    console.log('📭 [API] Отмечаем как прочитанное:', replyId);
+    res.json({ status: 'ok' });
+});
+
 // Health check
 app.get('/health', (req, res) => {
     res.json({ 
@@ -70,7 +83,7 @@ app.get('/debug', (req, res) => {
         users: Object.keys(repliesDB),
         totalReplies: Object.values(repliesDB).reduce((sum, replies) => sum + replies.length, 0),
         timestamp: new Date().toISOString(),
-        sessions: userSessions
+        sessions: Object.keys(userSessions).length
     });
 });
 
@@ -179,6 +192,6 @@ bot.on('error', (error) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`🚀 [SERVER] Сервер запущен на порту ${PORT}`);
-    console.log(`🌐 [SERVER] Health: http://localhost:${PORT}/health`);
-    console.log(`🔧 [SERVER] Debug: http://localhost:${PORT}/debug`);
+    console.log(`🌐 [SERVER] Health: https://vilena-bot.onrender.com/health`);
+    console.log(`🔧 [SERVER] Debug: https://vilena-bot.onrender.com/debug`);
 });
