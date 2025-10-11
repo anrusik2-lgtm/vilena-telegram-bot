@@ -7,6 +7,7 @@ const bot = new TelegramBot(token, { polling: true });
 
 // Временное хранилище ответов (в памяти)
 let repliesDB = {};
+let userSessions = {}; // Хранилище сессий
 
 // Middleware для API
 app.use(express.json());
@@ -33,7 +34,7 @@ app.get('/api/replies/:userId', (req, res) => {
 // Эндпоинт для сохранения ответа
 app.post('/api/replies', (req, res) => {
     const { userId, message } = req.body;
-    console.log('💾 Сохраняем ответ для:', userId);
+    console.log('💾 Сохраняем ответ для:', userId, 'Сообщение:', message);
     
     if (!repliesDB[userId]) {
         repliesDB[userId] = [];
@@ -46,7 +47,7 @@ app.post('/api/replies', (req, res) => {
     };
     
     repliesDB[userId].push(newReply);
-    console.log('✅ Ответ сохранен');
+    console.log('✅ Ответ сохранен. Всего ответов:', repliesDB[userId].length);
     
     res.json({ status: 'ok', id: newReply.id });
 });
@@ -82,11 +83,18 @@ bot.onText(/\/start(.+)?/, (msg, match) => {
     const chatId = msg.chat.id;
     const startPayload = match[1]; // то что после /start
     
+    console.log('🔗 Получена команда /start:', startPayload);
+    
     if (startPayload && startPayload.includes('reply_')) {
         const userId = startPayload.replace('reply_', '').trim();
         
+        console.log('👤 Установлен режим ответа для пользователя:', userId);
+        
         // Сохраняем userId для этого чата
-        userSessions[chatId] = { userId: userId, waitingForReply: true };
+        userSessions[chatId] = { 
+            userId: userId, 
+            waitingForReply: true 
+        };
         
         bot.sendMessage(chatId, 
             `💬 Режим ответа клиенту\n\n` +
@@ -102,16 +110,19 @@ bot.onText(/\/start(.+)?/, (msg, match) => {
     }
 });
 
-// Хранилище сессий
-const userSessions = {};
-
-// Обработчик текстовых сообщений
+// Обработчик ВСЕХ текстовых сообщений
 bot.on('message', (msg) => {
     const chatId = msg.chat.id;
     const text = msg.text;
     
+    console.log('📩 Получено сообщение:', text, 'от чата:', chatId);
+    console.log('💾 Текущие сессии:', userSessions);
+    
     // Пропускаем команды
-    if (text.startsWith('/')) return;
+    if (text.startsWith('/')) {
+        console.log('⏩ Пропускаем команду');
+        return;
+    }
     
     // Если это ответ менеджера клиенту
     if (userSessions[chatId] && userSessions[chatId].waitingForReply) {
@@ -132,8 +143,14 @@ bot.on('message', (msg) => {
         
         repliesDB[userId].push(newReply);
         
+        console.log('✅ Ответ сохранен в базу. Всего ответов:', repliesDB[userId].length);
+        
         bot.sendMessage(chatId, '✅ Ответ отправлен клиенту!');
+        
+        // Очищаем сессию
         userSessions[chatId].waitingForReply = false;
+    } else {
+        console.log('❌ Неизвестное сообщение, сессия не найдена');
     }
 });
 
@@ -141,4 +158,6 @@ bot.on('message', (msg) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`🚀 Сервер запущен на порту ${PORT}`);
+    console.log(`🌐 Health: http://localhost:${PORT}/health`);
+    console.log(`🔧 Debug: http://localhost:${PORT}/debug`);
 });
