@@ -11,6 +11,14 @@ let repliesDB = {};
 // Middleware для API
 app.use(express.json());
 
+// Разрешаем CORS
+app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    next();
+});
+
 // Эндпоинт для получения ответов
 app.get('/api/replies/:userId', (req, res) => {
     const userId = req.params.userId;
@@ -43,9 +51,21 @@ app.post('/api/replies', (req, res) => {
     res.json({ status: 'ok', id: newReply.id });
 });
 
+// Эндпоинт для отметки прочтения
+app.post('/api/replies/:replyId/read', (req, res) => {
+    const replyId = req.params.replyId;
+    console.log('📭 Отмечаем как прочитанное:', replyId);
+    res.json({ status: 'ok' });
+});
+
 // Health check
 app.get('/health', (req, res) => {
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+    res.json({ 
+        status: 'ok', 
+        timestamp: new Date().toISOString(),
+        users: Object.keys(repliesDB).length,
+        totalReplies: Object.values(repliesDB).reduce((sum, replies) => sum + replies.length, 0)
+    });
 });
 
 // Debug endpoint
@@ -90,8 +110,11 @@ bot.on('message', (msg) => {
     const chatId = msg.chat.id;
     const text = msg.text;
     
+    // Пропускаем команды
+    if (text.startsWith('/')) return;
+    
     // Если это ответ менеджера клиенту
-    if (userSessions[chatId] && userSessions[chatId].waitingForReply && text !== '/start') {
+    if (userSessions[chatId] && userSessions[chatId].waitingForReply) {
         const userId = userSessions[chatId].userId;
         
         console.log(`💬 Менеджер отвечает клиенту ${userId}:`, text);
