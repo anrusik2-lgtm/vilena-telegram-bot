@@ -20,7 +20,6 @@ app.use((req, res, next) => {
     res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control');
     res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     
-    // Обрабатываем preflight запросы
     if (req.method === 'OPTIONS') {
         return res.sendStatus(200);
     }
@@ -83,46 +82,50 @@ app.get('/debug', (req, res) => {
         users: Object.keys(repliesDB),
         totalReplies: Object.values(repliesDB).reduce((sum, replies) => sum + replies.length, 0),
         timestamp: new Date().toISOString(),
-        sessions: Object.keys(userSessions).length
+        sessions: userSessions
     });
 });
 
-// Обработчик команды /start
-bot.onText(/\/start/, (msg, match) => {
+// 🔧 ИСПРАВЛЕННЫЙ ОБРАБОТЧИК КОМАНДЫ /start
+bot.onText(/\/start(.+)?/, (msg, match) => {
     const chatId = msg.chat.id;
-    const text = msg.text;
+    const fullText = msg.text;
     
-    console.log('🔗 [BOT] Получена команда /start:', text);
+    console.log('🔗 [BOT] Получена команда /start:', fullText);
     console.log('👤 [BOT] От пользователя:', msg.from.username || msg.from.first_name);
     
-    // Проверяем есть ли параметр после /start
-    if (text.includes('reply_')) {
-        const parts = text.split(' ');
-        const payload = parts[1]; // часть после /start
+    // Извлекаем параметр после /start
+    const startPayload = match[1] ? match[1].trim() : null;
+    
+    console.log('🎯 [BOT] Start payload:', startPayload);
+    
+    if (startPayload && startPayload.startsWith('reply_')) {
+        const userId = startPayload;
         
-        console.log('🎯 [BOT] Найден payload:', payload);
+        console.log('👤 [BOT] Установлен режим ответа для пользователя:', userId);
         
-        if (payload && payload.includes('reply_')) {
-            const userId = payload.replace('reply_', '').trim();
-            
-            console.log('👤 [BOT] Установлен режим ответа для пользователя:', userId);
-            
-            // Сохраняем userId для этого чата
-            userSessions[chatId] = { 
-                userId: userId, 
-                waitingForReply: true,
-                username: msg.from.username || msg.from.first_name
-            };
-            
-            bot.sendMessage(chatId, 
-                `💬 Режим ответа клиенту\n\n` +
-                `ID клиента: ${userId}\n` +
-                `Напишите сообщение для клиента:`
-            );
-            
-            console.log('✅ [BOT] Сессия создана:', userSessions[chatId]);
-        }
+        // Сохраняем сессию
+        userSessions[chatId] = { 
+            userId: userId, 
+            waitingForReply: true,
+            username: msg.from.username || msg.from.first_name,
+            startedAt: new Date().toISOString()
+        };
+        
+        console.log('💾 [BOT] Сессия создана:', userSessions[chatId]);
+        
+        // Отправляем инструкцию менеджеру
+        bot.sendMessage(chatId, 
+            `💬 РЕЖИМ ОТВЕТА КЛИЕНТУ\n\n` +
+            `👤 ID клиента: ${userId}\n` +
+            `⏰ Начало: ${new Date().toLocaleString('ru-RU')}\n\n` +
+            `✍️ Напишите сообщение для клиента...`
+        ).then(() => {
+            console.log('✅ [BOT] Инструкция отправлена менеджеру');
+        });
+        
     } else {
+        // Стандартное приветствие
         bot.sendMessage(chatId, 
             '🤖 Бот Vilenamebel\n\n' +
             'Этот бот предназначен для ответов на заявки с сайта.\n\n' +
@@ -131,29 +134,30 @@ bot.onText(/\/start/, (msg, match) => {
     }
 });
 
-// Обработчик ВСЕХ текстовых сообщений
+// 🔧 ИСПРАВЛЕННЫЙ ОБРАБОТЧИК ТЕКСТОВЫХ СООБЩЕНИЙ
 bot.on('message', (msg) => {
     const chatId = msg.chat.id;
     const text = msg.text;
+    const messageId = msg.message_id;
     
-    console.log('📩 [BOT] Получено сообщение:', text);
-    console.log('👤 [BOT] От:', msg.from.username || msg.from.first_name);
-    console.log('💾 [BOT] Текущие сессии:', Object.keys(userSessions).length);
-    
-    // Пропускаем команды
-    if (text.startsWith('/')) {
-        console.log('⏩ [BOT] Пропускаем команду');
+    // Пропускаем команды и служебные сообщения
+    if (text.startsWith('/') || !text.trim()) {
         return;
     }
     
-    // Если это ответ менеджера клиенту
+    console.log('📩 [BOT] Получено сообщение:', text);
+    console.log('👤 [BOT] От:', msg.from.username || msg.from.first_name);
+    console.log('💾 [BOT] Активные сессии:', Object.keys(userSessions));
+    
+    // Проверяем есть ли активная сессия для этого чата
     if (userSessions[chatId] && userSessions[chatId].waitingForReply) {
-        const userId = userSessions[chatId].userId;
-        const managerName = userSessions[chatId].username;
+        const session = userSessions[chatId];
+        const userId = session.userId;
+        const managerName = session.username;
         
         console.log(`💬 [BOT] Менеджер ${managerName} отвечает клиенту ${userId}:`, text);
         
-        // Сохраняем ответ в наше хранилище
+        // Сохраняем ответ в базу
         if (!repliesDB[userId]) {
             repliesDB[userId] = [];
         }
@@ -162,23 +166,36 @@ bot.on('message', (msg) => {
             id: 'reply_' + Date.now(),
             message: text,
             timestamp: new Date().toISOString(),
-            manager: managerName
+            manager: managerName,
+            managerId: msg.from.id
         };
         
         repliesDB[userId].push(newReply);
         
         console.log('✅ [BOT] Ответ сохранен в базу. Всего ответов:', repliesDB[userId].length);
         
-        bot.sendMessage(chatId, '✅ Ответ отправлен клиенту!');
+        // Подтверждаем менеджеру
+        bot.sendMessage(chatId, 
+            '✅ Ответ отправлен клиенту!\n\n' +
+            '💬 Клиент увидит ваше сообщение в чате на сайте.\n\n' +
+            '🔄 Для нового ответа используйте ссылку из заявки.'
+        ).then(() => {
+            console.log('✅ [BOT] Подтверждение отправлено менеджеру');
+        });
         
         // Очищаем сессию
-        userSessions[chatId].waitingForReply = false;
+        delete userSessions[chatId];
         console.log('🔄 [BOT] Сессия очищена для чата:', chatId);
+        
     } else {
-        console.log('❌ [BOT] Неизвестное сообщение, сессия не найдена');
+        console.log('❌ [BOT] Сообщение не обработано - нет активной сессии');
+        
+        // Если нет активной сессии, напоминаем про ссылку
         bot.sendMessage(chatId, 
             '❌ Неизвестная команда\n\n' +
-            'Для ответа клиенту используйте ссылку из заявки.'
+            'Для ответа клиенту используйте ссылку из заявки:\n' +
+            'https://t.me/Vilena_bot?start=reply_USER_ID\n\n' +
+            'Замените USER_ID на ID клиента из заявки.'
         );
     }
 });
@@ -188,19 +205,15 @@ bot.on('error', (error) => {
     console.error('❌ [BOT] Ошибка бота:', error);
 });
 
+bot.on('polling_error', (error) => {
+    console.error('❌ [BOT] Ошибка polling:', error);
+});
+
 // Запускаем сервер
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`🚀 [SERVER] Сервер запущен на порту ${PORT}`);
     console.log(`🌐 [SERVER] Health: https://vilena-bot.onrender.com/health`);
     console.log(`🔧 [SERVER] Debug: https://vilena-bot.onrender.com/debug`);
-});
-
-// Добавьте этот эндпоинт в bot.js
-app.get('/logs', (req, res) => {
-    res.json({
-        sessions: userSessions,
-        repliesDB: repliesDB,
-        timestamp: new Date().toISOString()
-    });
+    console.log(`📊 [SERVER] Активные сессии: ${Object.keys(userSessions).length}`);
 });
