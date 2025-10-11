@@ -195,3 +195,12 @@ app.listen(PORT, () => {
     console.log(`🌐 [SERVER] Health: https://vilena-bot.onrender.com/health`);
     console.log(`🔧 [SERVER] Debug: https://vilena-bot.onrender.com/debug`);
 });
+
+// Добавьте этот эндпоинт в bot.js
+app.get('/logs', (req, res) => {
+    res.json({
+        sessions: userSessions,
+        repliesDB: repliesDB,
+        timestamp: new Date().toISOString()
+    });
+});
