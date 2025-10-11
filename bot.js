@@ -9,7 +9,6 @@ console.log('🤖 Бот запускается...');
 
 // Временное хранилище
 let repliesDB = {};
-let pendingReplies = {}; // Ожидающие ответы: { chatId: userId }
 
 // Middleware
 app.use(express.json());
@@ -59,112 +58,74 @@ app.get('/debug', (req, res) => {
     res.json({
         users: Object.keys(repliesDB),
         totalReplies: Object.values(repliesDB).reduce((sum, replies) => sum + replies.length, 0),
-        timestamp: new Date().toISOString(),
-        pendingReplies: pendingReplies
+        timestamp: new Date().toISOString()
     });
 });
 
-// 🔧 ПРОСТАЯ ЛОГИКА: Принимаем любой текст как ответ клиенту
+// 🔧 СУПЕР-ПРОСТАЯ ЛОГИКА: Каждое сообщение менеджера - это ответ клиенту
 bot.on('message', (msg) => {
     const chatId = msg.chat.id;
     const text = msg.text;
     const managerName = msg.from.username || msg.from.first_name;
     
-    console.log('📩 [BOT] Получено сообщение:', text);
-    console.log('👤 [BOT] От:', managerName);
+    console.log('📩 [BOT] Получено сообщение от менеджера:', text);
+    console.log('👤 [BOT] Менеджер:', managerName);
     
-    // Если это команда /start - просим прислать userId
-    if (text === '/start') {
-        console.log('🔗 [BOT] Получена команда /start');
-        
-        bot.sendMessage(chatId, 
-            `🤖 Бот Vilenamebel\n\n` +
-            `Для ответа клиенту:\n` +
-            `1. Откройте заявку на сайте\n` +
-            `2. Нажмите кнопку "Ответить"\n` +
-            `3. Используйте полученную ссылку\n\n` +
-            `⚠️ Не пишите /start вручную! Используйте ссылку из заявки.`
-        );
+    // Пропускаем команды
+    if (text.startsWith('/')) {
+        if (text === '/start') {
+            bot.sendMessage(chatId, 
+                `🤖 Бот Vilenamebel\n\n` +
+                `✍️ Напишите сообщение для клиента.\n\n` +
+                `📝 Формат:\n` +
+                `user_1234567890: Ваше сообщение\n\n` +
+                `ℹ️ user_id можно взять из заявки на сайте`
+            );
+        }
         return;
     }
     
-    // Если у нас есть ожидающий ответ для этого чата
-    if (pendingReplies[chatId]) {
-        const userId = pendingReplies[chatId];
+    // Ищем user_id в сообщении
+    const userIdMatch = text.match(/(user_\w+)/);
+    
+    if (userIdMatch) {
+        const userId = userIdMatch[1];
+        const message = text.replace(userId + ':', '').replace(userId, '').trim();
         
-        console.log(`💬 [BOT] Менеджер ${managerName} отвечает клиенту ${userId}:`, text);
-        
-        // Сохраняем ответ
-        if (!repliesDB[userId]) repliesDB[userId] = [];
-        
-        const newReply = {
-            id: 'reply_' + Date.now(),
-            message: text,
-            timestamp: new Date().toISOString(),
-            manager: managerName
-        };
-        
-        repliesDB[userId].push(newReply);
-        
-        console.log('✅ [BOT] Ответ сохранен в базу. Всего ответов:', repliesDB[userId].length);
-        
-        // Подтверждаем
-        bot.sendMessage(chatId, 
-            '✅ Ответ отправлен клиенту!\n\n' +
-            '💬 Клиент увидит ваше сообщение в чате на сайте.\n\n' +
-            '🔄 Для нового ответа используйте ссылку из следующей заявки.'
-        );
-        
-        // Очищаем ожидание
-        delete pendingReplies[chatId];
-        
-    } else {
-        // Если нет ожидающего ответа, но сообщение похоже на userId
-        if (text.startsWith('reply_') || text.startsWith('user_')) {
-            const userId = text.trim();
+        if (message) {
+            console.log(`💬 [BOT] Менеджер ${managerName} отвечает клиенту ${userId}:`, message);
             
-            console.log('🎯 [BOT] Обнаружен userId:', userId);
+            // Сохраняем ответ
+            if (!repliesDB[userId]) repliesDB[userId] = [];
             
-            // Сохраняем ожидание ответа
-            pendingReplies[chatId] = userId;
+            const newReply = {
+                id: 'reply_' + Date.now(),
+                message: message,
+                timestamp: new Date().toISOString(),
+                manager: managerName
+            };
+            
+            repliesDB[userId].push(newReply);
+            
+            console.log('✅ [BOT] Ответ сохранен в базу. Всего ответов:', repliesDB[userId].length);
             
             bot.sendMessage(chatId, 
-                `💬 РЕЖИМ ОТВЕТА КЛИЕНТУ\n\n` +
-                `👤 ID клиента: ${userId}\n\n` +
-                `✍️ Напишите сообщение для клиента...`
+                '✅ Ответ отправлен клиенту!\n\n' +
+                `👤 Клиент: ${userId}\n` +
+                `💬 Сообщение: ${message}\n\n` +
+                '🔄 Клиент увидит ответ в чате на сайте.'
             );
             
         } else {
-            // Неизвестное сообщение
-            bot.sendMessage(chatId, 
-                '❌ Неизвестная команда\n\n' +
-                'Для ответа клиенту используйте ссылку из заявки на сайте vilenamebel.ru\n\n' +
-                'Ссылка выглядит так:\n' +
-                'https://t.me/Vilena_bot?start=reply_USER_ID'
-            );
+            bot.sendMessage(chatId, '❌ Напишите сообщение после user_id');
         }
-    }
-});
-
-// Обработчик для прямых ссылок с параметром
-bot.onText(/\/start (.+)/, (msg, match) => {
-    const chatId = msg.chat.id;
-    const userId = match[1].trim();
-    const managerName = msg.from.username || msg.from.first_name;
-    
-    console.log('🔗 [BOT] Получена команда /start с параметром:', userId);
-    
-    if (userId.startsWith('reply_')) {
-        // Сохраняем ожидание ответа
-        pendingReplies[chatId] = userId;
-        
+    } else {
         bot.sendMessage(chatId, 
-            `💬 РЕЖИМ ОТВЕТА КЛИЕНТУ\n\n` +
-            `👤 ID клиента: ${userId}\n\n` +
-            `✍️ Напишите сообщение для клиента...`
+            '❌ Не найден user_id клиента\n\n' +
+            '📝 Формат сообщения:\n' +
+            'user_1234567890: Ваше сообщение для клиента\n\n' +
+            'ℹ️ user_id можно взять из заявки на сайте'
         );
-        
-        console.log('✅ [BOT] Ожидание ответа установлено для:', userId);
     }
 });
 
